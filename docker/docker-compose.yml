@@ -69,6 +69,35 @@ services:
       echo 'Kafka topics created.';
       "
 
+  ledger-api:
+    build:
+      context: ../ledger-api
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      MONGO_URI: mongodb://mongo:27017/ledger
+      KAFKA_BOOTSTRAP: kafka:9092
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
   prometheus:
     image: prom/prometheus:v2.52.0
     ports:
@@ -76,6 +105,7 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
+      - ledger-api
       - grafana
 
   grafana:

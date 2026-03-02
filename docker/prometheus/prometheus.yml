@@ -3,6 +3,6 @@ global:
 
 scrape_configs:
   - job_name: 'ledger-api'
-    metrics_path: /metrics
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['host.docker.internal:8080']
+      - targets: ['ledger-api:8080']

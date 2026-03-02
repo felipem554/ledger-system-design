@@ -1,0 +1,41 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ledger}
+    username: ${DB_USER:ledger}
+    password: ${DB_PASS:ledger}
+    hikari:
+      maximum-pool-size: 5
+
+  flyway:
+    enabled: true
+
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/ledger_test}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+ledger:
+  outbox:
+    poll-interval-ms: 100
+    batch-size: 50
+  kafka:
+    topic:
+      transactions: ledger.transactions.test.v1
+      dlq: ledger.outbox.dlq.test.v1
+    partition-buckets: 16
+
+logging:
+  level:
+    root: WARN
+    com.ledger: DEBUG
