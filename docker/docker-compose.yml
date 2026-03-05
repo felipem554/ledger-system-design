@@ -29,7 +29,7 @@ services:
       retries: 20
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: bitnami/kafka:3.7.0
     ports:
       - "9092:9092"
     environment:
@@ -55,7 +55,7 @@ services:
       retries: 30
 
   kafka-init:
-    image: bitnami/kafka:3.7
+    image: bitnami/kafka:3.7.0
     depends_on:
       kafka:
         condition: service_healthy
