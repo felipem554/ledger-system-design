@@ -14,7 +14,7 @@ spring:
       uri: ${MONGO_URI:mongodb://localhost:27017/ledger_test}
 
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:19092}
     consumer:
       auto-offset-reset: earliest
       enable-auto-commit: false
