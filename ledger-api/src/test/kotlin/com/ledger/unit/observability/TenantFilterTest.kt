@@ -1,6 +1,9 @@
 package com.ledger.unit.observability
 
 import com.ledger.observability.TenantFilter
+import jakarta.servlet.FilterChain
+import jakarta.servlet.ServletRequest
+import jakarta.servlet.ServletResponse
 import org.junit.jupiter.api.Test
 import org.slf4j.MDC
 import org.springframework.mock.web.MockFilterChain
@@ -21,7 +24,7 @@ class TenantFilterTest {
         var capturedTenant: String? = null
         var capturedTrace: String? = null
 
-        val chain = MockFilterChain { _, _ ->
+        val chain = FilterChain { _, _ ->
             capturedTenant = MDC.get("tenantId")
             capturedTrace = MDC.get("traceId")
         }
@@ -40,7 +43,7 @@ class TenantFilterTest {
         val response = MockHttpServletResponse()
 
         var capturedTrace: String? = null
-        val chain = MockFilterChain { _, _ ->
+        val chain = FilterChain { _, _ ->
             capturedTrace = MDC.get("traceId")
         }
 
@@ -69,7 +72,7 @@ class TenantFilterTest {
         request.addHeader("X-Tenant-Id", "error-test")
         val response = MockHttpServletResponse()
 
-        val chain = MockFilterChain { _, _ ->
+        val chain = FilterChain { _, _ ->
             throw RuntimeException("boom")
         }
 
