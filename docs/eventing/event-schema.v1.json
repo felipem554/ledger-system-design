@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "eventEnvelope": {
+    "eventId": "uuid",
+    "eventType": "TransactionPosted|TransactionReversed",
+    "tenantId": "string",
+    "txId": "string",
+    "occurredAt": "RFC3339 timestamp",
+    "producer": {
+      "service": "ledger-api",
+      "version": "git-sha"
+    },
+    "payload": {
+      "currency": "EUR",
+      "externalRef": "order_123",
+      "entries": [
+        {
+          "accountId": "A1",
+          "direction": "DEBIT",
+          "amountMinor": 1000
+        },
+        {
+          "accountId": "A2",
+          "direction": "CREDIT",
+          "amountMinor": 1000
+        }
+      ],
+      "metadata": {
+        "reason": "purchase"
+      }
+    }
+  }
+}

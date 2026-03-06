@@ -1,0 +1,75 @@
+Project ledger {
+  database_type: "PostgreSQL"
+}
+
+Table accounts {
+  id varchar [pk]
+  tenant_id varchar
+  name varchar
+  type varchar
+  currency varchar
+  status varchar
+  created_at timestamptz
+}
+
+Table account_state {
+  tenant_id varchar
+  account_id varchar
+  posted_balance_minor bigint
+  version bigint
+  updated_at timestamptz
+  indexes {
+    (tenant_id, account_id) [pk]
+  }
+}
+
+Table transactions_min {
+  tx_id varchar [pk]
+  tenant_id varchar
+  occurred_at timestamptz
+  currency varchar
+  external_ref varchar
+}
+
+Table entries {
+  id bigint [pk, increment]
+  tenant_id varchar
+  tx_id varchar
+  account_id varchar
+  direction varchar
+  amount_minor bigint
+  created_at timestamptz
+  indexes {
+    (tenant_id, account_id, created_at)
+    (tenant_id, tx_id)
+  }
+}
+
+Table idempotency {
+  tenant_id varchar
+  key varchar
+  request_hash varchar
+  tx_id varchar
+  status varchar
+  created_at timestamptz
+  indexes {
+    (tenant_id, key) [unique]
+  }
+}
+
+Table outbox {
+  event_id uuid [pk]
+  tenant_id varchar
+  event_type varchar
+  payload jsonb
+  created_at timestamptz
+  published_at timestamptz
+  indexes {
+    (published_at)
+    (tenant_id, created_at)
+  }
+}
+
+Ref: transactions_min.tx_id < entries.tx_id
+Ref: accounts.id < entries.account_id
+Ref: accounts.id < account_state.account_id

@@ -1,0 +1,475 @@
+openapi: 3.0.3
+info:
+  title: Distributed Ledger API
+  version: 1.0.0
+  description: >
+    High-throughput double-entry ledger. Write correctness is guaranteed by the write store
+    and idempotency. Transaction history is served from projections.
+servers:
+  - url: https://api.example.com
+tags:
+  - name: Health
+  - name: Accounts
+  - name: Transactions
+  - name: Idempotency
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Tenant identifier (or derived from JWT in production).
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Unique key per client request to guarantee idempotent writes.
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Cursor token for pagination.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        traceId:
+          type: string
+    Money:
+      type: object
+      required: [currency, amountMinor]
+      properties:
+        currency:
+          type: string
+          example: EUR
+        amountMinor:
+          type: integer
+          format: int64
+          example: 1000
+    AccountType:
+      type: string
+      enum: [ASSET, LIABILITY, INCOME, EXPENSE, EQUITY]
+    AccountStatus:
+      type: string
+      enum: [OPEN, CLOSED]
+    Direction:
+      type: string
+      enum: [DEBIT, CREDIT]
+    Account:
+      type: object
+      required: [id, tenantId, name, type, currency, status, createdAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/AccountType' }
+        currency: { type: string }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+    CreateAccountRequest:
+      type: object
+      required: [name, type, currency]
+      properties:
+        name: { type: string }
+        type: { $ref: '#/components/schemas/AccountType' }
+        currency: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+    BalanceResponse:
+      type: object
+      required: [accountId, tenantId, currency, postedBalanceMinor, version, asOf]
+      properties:
+        accountId: { type: string }
+        tenantId: { type: string }
+        currency: { type: string }
+        postedBalanceMinor: { type: integer, format: int64 }
+        version: { type: integer, format: int64 }
+        asOf:
+          type: object
+          required: [txId, timestamp]
+          properties:
+            txId: { type: string }
+            timestamp: { type: string, format: date-time }
+    EntryInput:
+      type: object
+      required: [accountId, direction, amountMinor]
+      properties:
+        accountId: { type: string }
+        direction: { $ref: '#/components/schemas/Direction' }
+        amountMinor: { type: integer, format: int64, minimum: 1 }
+    TransactionRequest:
+      type: object
+      required: [currency, entries]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: If omitted, server time is used.
+        externalRef:
+          type: string
+          description: Client/business reference (e.g., order_123).
+        currency: { type: string }
+        entries:
+          type: array
+          minItems: 2
+          maxItems: 50
+          items: { $ref: '#/components/schemas/EntryInput' }
+        metadata:
+          type: object
+          additionalProperties: true
+    TransactionCreatedResponse:
+      type: object
+      required: [txId, tenantId, status, occurredAt]
+      properties:
+        txId: { type: string }
+        tenantId: { type: string }
+        status:
+          type: string
+          enum: [POSTED]
+        occurredAt: { type: string, format: date-time }
+    Transaction:
+      type: object
+      required: [txId, tenantId, occurredAt, currency, entries, status]
+      properties:
+        txId: { type: string }
+        tenantId: { type: string }
+        occurredAt: { type: string, format: date-time }
+        currency: { type: string }
+        status:
+          type: string
+          enum: [POSTED, REVERSED]
+        externalRef: { type: string }
+        entries:
+          type: array
+          items:
+            type: object
+            required: [accountId, direction, amountMinor]
+            properties:
+              accountId: { type: string }
+              direction: { $ref: '#/components/schemas/Direction' }
+              amountMinor: { type: integer, format: int64 }
+        metadata:
+          type: object
+          additionalProperties: true
+    PagedTransactions:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Transaction' }
+        nextCursor:
+          type: string
+          nullable: true
+    BatchTransactionItem:
+      type: object
+      required: [idempotencyKey, transaction]
+      properties:
+        idempotencyKey: { type: string }
+        transaction: { $ref: '#/components/schemas/TransactionRequest' }
+    BatchRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/BatchTransactionItem' }
+    BatchResponseItem:
+      type: object
+      required: [idempotencyKey, status]
+      properties:
+        idempotencyKey: { type: string }
+        status:
+          type: string
+          enum: [CREATED, REPLAYED, FAILED]
+        txId: { type: string, nullable: true }
+        error: { $ref: '#/components/schemas/ErrorResponse' }
+    BatchResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/BatchResponseItem' }
+    IdempotencyStatus:
+      type: object
+      required: [key, status]
+      properties:
+        key: { type: string }
+        status:
+          type: string
+          enum: [CREATED, REPLAYED, CONFLICT]
+        txId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+security:
+  - BearerAuth: []
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      responses:
+        '200': { description: OK }
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      responses:
+        '200': { description: OK }
+        '503': { description: Not ready }
+  /v1/accounts:
+    post:
+      tags: [Accounts]
+      summary: Create account
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAccountRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    get:
+      tags: [Accounts]
+      summary: List accounts
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/AccountType' }
+        - name: currency
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AccountStatus' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Account' }
+                  nextCursor:
+                    type: string
+                    nullable: true
+  /v1/accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: Get account
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '404': { description: Not found }
+  /v1/accounts/{accountId}:close:
+    post:
+      tags: [Accounts]
+      summary: Close account
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Closed }
+        '409': { description: Conflict (already closed) }
+  /v1/accounts/{accountId}/balance:
+    get:
+      tags: [Accounts]
+      summary: Get current posted balance
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BalanceResponse' }
+  /v1/transactions:
+    post:
+      tags: [Transactions]
+      summary: Post a balanced double-entry transaction (atomic)
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransactionRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionCreatedResponse' }
+        '409':
+          description: Idempotency conflict or concurrency conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    get:
+      tags: [Transactions]
+      summary: List transactions (projection)
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: externalRef
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedTransactions' }
+  /v1/transactions/{txId}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction by id
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: txId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '404': { description: Not found }
+  /v1/transactions/{txId}:reverse:
+    post:
+      tags: [Transactions]
+      summary: Reverse a transaction by creating a new compensating transaction
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - name: txId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201':
+          description: Reversal created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionCreatedResponse' }
+        '404': { description: Not found }
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/transactions:batch:
+    post:
+      tags: [Transactions]
+      summary: Batch post transactions (per-item idempotency)
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BatchRequest' }
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchResponse' }
+  /v1/idempotency/{key}:
+    get:
+      tags: [Idempotency]
+      summary: Check idempotency key status
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdempotencyStatus' }
+        '404': { description: Not found }
