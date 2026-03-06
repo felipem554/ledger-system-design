@@ -11,6 +11,10 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.util.UUID
 
+/**
+ * Integration tests for accounts — focuses on persistence and cursor-based
+ * pagination that require a real database.
+ */
 class AccountIT : BaseIntegrationTest() {
 
     @Autowired lateinit var mockMvc: MockMvc
@@ -19,68 +23,38 @@ class AccountIT : BaseIntegrationTest() {
     private val tenant = "test-tenant-account-${UUID.randomUUID()}"
 
     @Test
-    fun `should create account`() {
+    fun `should persist account and retrieve it`() {
         val request = CreateAccountRequest(
-            name = "Test Asset Account",
+            name = "Persisted Account",
             type = AccountType.ASSET,
             currency = "EUR",
             metadata = mapOf("owner" to "test")
         )
 
-        mockMvc.perform(
+        val result = mockMvc.perform(
             post("/v1/accounts")
                 .header("X-Tenant-Id", tenant)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request))
         )
             .andExpect(status().isCreated)
-            .andExpect(jsonPath("$.id").exists())
-            .andExpect(jsonPath("$.tenantId").value(tenant))
-            .andExpect(jsonPath("$.name").value("Test Asset Account"))
-            .andExpect(jsonPath("$.type").value("ASSET"))
-            .andExpect(jsonPath("$.currency").value("EUR"))
             .andExpect(jsonPath("$.status").value("OPEN"))
-    }
+            .andReturn()
 
-    @Test
-    fun `should get account by id`() {
-        val accountId = createAccount("Get Test Account", AccountType.LIABILITY)
+        val id = objectMapper.readTree(result.response.contentAsString).get("id").asText()
 
         mockMvc.perform(
-            get("/v1/accounts/$accountId")
+            get("/v1/accounts/$id")
                 .header("X-Tenant-Id", tenant)
         )
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.id").value(accountId))
-            .andExpect(jsonPath("$.name").value("Get Test Account"))
+            .andExpect(jsonPath("$.id").value(id))
+            .andExpect(jsonPath("$.name").value("Persisted Account"))
+            .andExpect(jsonPath("$.currency").value("EUR"))
     }
 
     @Test
-    fun `should return 404 for non-existent account`() {
-        mockMvc.perform(
-            get("/v1/accounts/nonexistent")
-                .header("X-Tenant-Id", tenant)
-        ).andExpect(status().isNotFound)
-    }
-
-    @Test
-    fun `should list accounts with pagination`() {
-        repeat(5) { i ->
-            createAccount("List Account $i", AccountType.ASSET)
-        }
-
-        mockMvc.perform(
-            get("/v1/accounts")
-                .header("X-Tenant-Id", tenant)
-                .param("limit", "3")
-        )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.items.length()").value(3))
-            .andExpect(jsonPath("$.nextCursor").exists())
-    }
-
-    @Test
-    fun `should close account`() {
+    fun `should persist closed status across requests`() {
         val accountId = createAccount("Close Test Account", AccountType.EXPENSE)
 
         mockMvc.perform(
@@ -92,18 +66,7 @@ class AccountIT : BaseIntegrationTest() {
             get("/v1/accounts/$accountId")
                 .header("X-Tenant-Id", tenant)
         )
-            .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("CLOSED"))
-    }
-
-    @Test
-    fun `should conflict when closing already closed account`() {
-        val accountId = createAccount("Double Close Account", AccountType.INCOME)
-
-        mockMvc.perform(
-            post("/v1/accounts/$accountId:close")
-                .header("X-Tenant-Id", tenant)
-        ).andExpect(status().isOk)
 
         mockMvc.perform(
             post("/v1/accounts/$accountId:close")
@@ -112,31 +75,31 @@ class AccountIT : BaseIntegrationTest() {
     }
 
     @Test
-    fun `should get zero balance for new account`() {
-        val accountId = createAccount("Zero Balance Account", AccountType.ASSET)
+    fun `should paginate accounts with cursor from database`() {
+        repeat(5) { i ->
+            createAccount("Paginate Account $i", AccountType.ASSET)
+        }
 
-        mockMvc.perform(
-            get("/v1/accounts/$accountId/balance")
+        val page1 = mockMvc.perform(
+            get("/v1/accounts")
                 .header("X-Tenant-Id", tenant)
+                .param("limit", "3")
         )
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.postedBalanceMinor").value(0))
-            .andExpect(jsonPath("$.version").value(0))
-    }
+            .andExpect(jsonPath("$.items.length()").value(3))
+            .andExpect(jsonPath("$.nextCursor").exists())
+            .andReturn()
 
-    @Test
-    fun `should filter accounts by type`() {
-        createAccount("Filter Asset 1", AccountType.ASSET)
-        createAccount("Filter Asset 2", AccountType.ASSET)
-        createAccount("Filter Liability", AccountType.LIABILITY)
+        val cursor = objectMapper.readTree(page1.response.contentAsString).get("nextCursor").asText()
 
         mockMvc.perform(
             get("/v1/accounts")
                 .header("X-Tenant-Id", tenant)
-                .param("type", "ASSET")
+                .param("cursor", cursor)
+                .param("limit", "3")
         )
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.items").isArray)
+            .andExpect(jsonPath("$.items.length()").value(2))
     }
 
     private fun createAccount(name: String, type: AccountType): String {

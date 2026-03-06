@@ -1,19 +1,51 @@
 # Testing Guide
 
-Integration tests require PostgreSQL 16, MongoDB 7, and Apache Kafka. You can
-provide these dependencies in two ways: **Testcontainers** (zero setup, requires
-Docker) or **Docker Compose** (faster iteration, services stay running).
+## Testing Pyramid
+
+This project follows the **Testing Pyramid** strategy:
+
+```
+         /  E2E   \          ~10%  — Smoke tests against running stack
+        /----------\
+       / Integration \       ~20%  — Testcontainers or Compose (real DB/Kafka)
+      /----------------\
+     /    Unit Tests     \   ~70%  — Pure logic, mocks, fast, no I/O
+    /____________________\
+```
+
+| Layer | Location | Infra required | Gradle task |
+|-------|----------|----------------|-------------|
+| **Unit** | `com.ledger.unit.*` | None | `./gradlew unitTest` |
+| **Integration** | `com.ledger.integration.*` | Postgres, Mongo, Kafka | `./gradlew integrationTest` |
+| **E2E** | `com.ledger.e2e.*` | Full running stack | `./gradlew e2eTest` |
+| **All (no E2E)** | unit + integration | Postgres, Mongo, Kafka | `./gradlew test` |
 
 ---
 
-## Option 1 — Testcontainers (self-contained)
+## Unit tests (70%)
 
-Testcontainers spins up disposable containers automatically when the tests run.
-No manual setup needed — just Docker on the host.
+Fast, no infrastructure required. Use Mockito to isolate service logic.
 
 ```bash
 cd ledger-api
-./gradlew test -Dspring.profiles.active=test,testcontainers
+./gradlew unitTest
+```
+
+Covers: service validation, exception handling, event routing, retry logic,
+partition key generation, MDC filter, error mapping.
+
+---
+
+## Integration tests (20%)
+
+Require real Postgres, MongoDB, and Kafka. Two ways to provide them:
+
+### Option A — Testcontainers (self-contained)
+
+Spins up disposable containers automatically. Just needs Docker.
+
+```bash
+./gradlew integrationTest -Dspring.profiles.active=test,testcontainers
 ```
 
 **How it works:** The `testcontainers` profile activates
@@ -30,61 +62,68 @@ before the Spring context loads and injects their dynamic connection URLs.
 - Requires Docker socket (may not work in all CI environments)
 - Kafka image is `confluentinc/cp-kafka:7.6.1` (compose uses `apache/kafka:3.8.1`)
 
----
+### Option B — Docker Compose (fast iteration)
 
-## Option 2 — Docker Compose (fast iteration)
-
-Start the infrastructure once and run tests against it repeatedly.
-
-### Start the test services
+Start infrastructure once, run tests repeatedly.
 
 ```bash
+# Start test services
 docker compose -f docker/docker-compose-test.yml up -d --wait
-```
 
-This starts lightweight versions of Postgres, Mongo, and Kafka using `tmpfs`
-volumes (data is discarded on container stop).
+# Run integration tests
+./gradlew integrationTest
 
-### Run the tests
-
-```bash
-cd ledger-api
-./gradlew test
-```
-
-Without the `testcontainers` profile, tests connect to `localhost` using the
-defaults in `application-test.yml` (ports 5432, 27017, 19092).
-
-### Tear down
-
-```bash
+# Tear down
 docker compose -f docker/docker-compose-test.yml down
 ```
 
 **When to use:**
-- Rapid local development — run tests in < 5 s with no startup penalty
-- CI environments where Docker-in-Docker is unavailable but compose services
-  can be started as a separate step
-- When you want to inspect database/broker state between test runs
+- Rapid local development — no startup penalty after first `docker compose up`
+- CI environments where Docker-in-Docker is unavailable
+- When you want to inspect database/broker state between runs
 
 **Trade-offs:**
-- Requires a manual `docker compose up` step (or a CI job step)
-- State persists across test runs (mitigate with `@Transactional` or cleanup)
+- Requires manual `docker compose up` step
+- State persists across test runs (each IT uses unique tenant IDs to mitigate)
 - Port conflicts if other services use 5432/27017/19092
 
 ---
 
-## Option 3 — Full development stack
+## E2E smoke tests (10%)
 
-You can also run the full dev compose file, which includes the API, Prometheus,
-and Grafana alongside the infrastructure:
+Run against a fully running ledger stack (API + all infrastructure).
 
 ```bash
+# Start the full stack
 docker compose -f docker/docker-compose.yml up -d --wait
+
+# Run E2E tests
+./gradlew e2eTest
+
+# Or target a remote environment
+E2E_BASE_URL=https://staging.example.com ./gradlew e2eTest
 ```
 
-Then run tests the same way as Option 2. The ports and credentials are
-identical.
+E2E tests use `RestTemplate` (no Spring context) and verify the critical path:
+health check → create accounts → post transaction → verify balance → reverse →
+close account.
+
+---
+
+## Running everything together
+
+```bash
+# Unit + integration (default ./gradlew test, excludes e2e)
+docker compose -f docker/docker-compose-test.yml up -d --wait
+./gradlew test
+
+# Unit + integration with Testcontainers (no compose needed)
+./gradlew test -Dspring.profiles.active=test,testcontainers
+
+# Full pyramid including E2E
+docker compose -f docker/docker-compose.yml up -d --wait
+./gradlew test && ./gradlew e2eTest
+```
 
 ---
 
@@ -101,28 +140,41 @@ identical.
 
 ---
 
-## Unit tests
-
-Unit tests use Mockito and have no infrastructure dependencies:
-
-```bash
-cd ledger-api
-./gradlew test --tests "com.ledger.unit.*"
-```
-
----
-
-## Running specific integration tests
+## Running specific tests
 
 ```bash
 # Single test class
 ./gradlew test --tests "com.ledger.integration.AccountIT"
 
 # Single test method
-./gradlew test --tests "com.ledger.integration.AccountIT.should create account"
+./gradlew test --tests "com.ledger.unit.service.TransactionServiceTest.should reject unbalanced transaction"
 
 # All integration tests with Testcontainers
-./gradlew test --tests "com.ledger.integration.*" -Dspring.profiles.active=test,testcontainers
+./gradlew integrationTest -Dspring.profiles.active=test,testcontainers
+```
+
+---
+
+## CI pipeline example
+
+```yaml
+# Path to production: unit → integration → e2e
+jobs:
+  unit:
+    steps:
+      - run: ./gradlew unitTest                          # ~5s, no Docker
+
+  integration:
+    needs: unit
+    services: [postgres, mongo, kafka]                    # or use testcontainers
+    steps:
+      - run: ./gradlew integrationTest                   # ~15s
+
+  e2e:
+    needs: integration
+    steps:
+      - run: docker compose -f docker/docker-compose.yml up -d --wait
+      - run: ./gradlew e2eTest                           # ~10s
 ```
 
 ---
@@ -135,3 +187,4 @@ cd ledger-api
 | `Could not find a valid Docker environment` | Docker daemon not running, or socket not accessible. Required for Testcontainers mode. |
 | Port already in use | Stop conflicting services, or use Testcontainers mode (uses random ports). |
 | Tests pass locally but fail in CI | Check if CI has Docker socket access. If not, start compose services in a prior CI step and skip the `testcontainers` profile. |
+| E2E tests fail with connection refused | The full stack must be running (`docker compose -f docker/docker-compose.yml up -d --wait`). Check `E2E_BASE_URL`. |

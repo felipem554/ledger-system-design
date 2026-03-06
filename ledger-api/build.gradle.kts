@@ -68,7 +68,47 @@ tasks.withType<KotlinCompile> {
     }
 }
 
+// --- Test tasks -----------------------------------------------------------
+
+// Default: runs unit tests only (fast, no infra needed)
 tasks.withType<Test> {
     useJUnitPlatform()
-    systemProperty("spring.profiles.active", "test")
+    systemProperty("spring.profiles.active", System.getProperty("spring.profiles.active") ?: "test")
+}
+
+tasks.test {
+    useJUnitPlatform {
+        excludeTags("e2e")
+    }
+    description = "Runs unit + integration tests (requires DB/Kafka or testcontainers profile)"
+}
+
+tasks.register<Test>("unitTest") {
+    useJUnitPlatform()
+    description = "Runs unit tests only — no infrastructure required"
+    group = "verification"
+    filter {
+        includeTestsMatching("com.ledger.unit.*")
+    }
+}
+
+tasks.register<Test>("integrationTest") {
+    useJUnitPlatform {
+        excludeTags("e2e")
+    }
+    description = "Runs integration tests (requires compose services or testcontainers profile)"
+    group = "verification"
+    filter {
+        includeTestsMatching("com.ledger.integration.*")
+    }
+    systemProperty("spring.profiles.active", System.getProperty("spring.profiles.active") ?: "test")
+}
+
+tasks.register<Test>("e2eTest") {
+    useJUnitPlatform {
+        includeTags("e2e")
+    }
+    description = "Runs E2E smoke tests against a running ledger stack"
+    group = "verification"
+    systemProperty("spring.profiles.active", "e2e")
 }
