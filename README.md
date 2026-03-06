@@ -27,6 +27,7 @@ The target platform is designed around:
 - `docs/adr/ADR-002-idempotency.md`
 - `docs/adr/ADR-003-kafka-partitioning.md`
 - `docs/adr/ADR-004-at-least-once.md`
+- `docs/adr/ADR-005-testing-pyramid.md`
 
 ### Operations and Reliability
 - Eventing model: `docs/eventing/eventing.md`
@@ -35,7 +36,12 @@ The target platform is designed around:
 - Runbook (hot account contention): `docs/runbooks/hot-account-contention.md`
 - Runbook (outbox lag): `docs/runbooks/outbox-lag.md`
 
+### Project Organization
+- Repository organization strategy: `docs/architecture/repository-organization.md`
+
 ### Testing
+- Testing strategy (pyramid): `docs/testing/testing-strategy.md`
+- Testing guide: `TESTING.md`
 - Testcontainers approach: `docs/testing/testcontainers.md`
 - k6 suite notes: `k6/README.md`
 
