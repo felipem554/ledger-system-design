@@ -15,10 +15,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.util.UUID
 
-/**
- * Integration tests for reversals — focuses on balance restoration
- * that requires real DB persistence verification.
- */
 class ReversalIT : BaseIntegrationTest() {
 
     @Autowired lateinit var mockMvc: MockMvc
@@ -35,12 +31,29 @@ class ReversalIT : BaseIntegrationTest() {
     }
 
     @Test
-    fun `reversal should restore balance to zero in database`() {
+    fun `should reverse a posted transaction`() {
+        val txId = postTransaction(1000)
+
+        mockMvc.perform(
+            post("/v1/transactions/$txId:reverse")
+                .header("X-Tenant-Id", tenant)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.txId").exists())
+            .andExpect(jsonPath("$.status").value("POSTED"))
+    }
+
+    @Test
+    fun `reversal should restore balance to zero`() {
         val txId = postTransaction(3000)
 
         mockMvc.perform(
-            get("/v1/accounts/$accountA/balance").header("X-Tenant-Id", tenant)
-        ).andExpect(jsonPath("$.postedBalanceMinor").value(-3000))
+            get("/v1/accounts/$accountA/balance")
+                .header("X-Tenant-Id", tenant)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.postedBalanceMinor").value(-3000))
 
         mockMvc.perform(
             post("/v1/transactions/$txId:reverse")
@@ -49,12 +62,15 @@ class ReversalIT : BaseIntegrationTest() {
         ).andExpect(status().isCreated)
 
         mockMvc.perform(
-            get("/v1/accounts/$accountA/balance").header("X-Tenant-Id", tenant)
-        ).andExpect(jsonPath("$.postedBalanceMinor").value(0))
+            get("/v1/accounts/$accountA/balance")
+                .header("X-Tenant-Id", tenant)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.postedBalanceMinor").value(0))
     }
 
     @Test
-    fun `double reversal should be rejected by database state`() {
+    fun `should not allow double reversal`() {
         val txId = postTransaction(500)
 
         mockMvc.perform(
@@ -68,6 +84,15 @@ class ReversalIT : BaseIntegrationTest() {
                 .header("X-Tenant-Id", tenant)
                 .header("Idempotency-Key", UUID.randomUUID().toString())
         ).andExpect(status().isConflict)
+    }
+
+    @Test
+    fun `should return 404 for non-existent transaction reversal`() {
+        mockMvc.perform(
+            post("/v1/transactions/nonexistent-tx:reverse")
+                .header("X-Tenant-Id", tenant)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+        ).andExpect(status().isNotFound)
     }
 
     private fun postTransaction(amountMinor: Long): String {

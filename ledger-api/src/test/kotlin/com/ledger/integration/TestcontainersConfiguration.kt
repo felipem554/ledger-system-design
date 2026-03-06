@@ -13,27 +13,20 @@ import org.testcontainers.utility.DockerImageName
  * Starts Postgres, MongoDB, and Kafka via Testcontainers and injects
  * their connection properties into the Spring context.
  *
- * Only activates when the "testcontainers" profile is present.
- * Containers are shared across all tests (started once, reused via lazy init).
+ * Containers are shared across all integration tests (started once via
+ * companion object lazy init, reused for every Spring context reload).
  */
 class TestcontainersInitializer : ApplicationContextInitializer<ConfigurableApplicationContext> {
 
     override fun initialize(ctx: ConfigurableApplicationContext) {
-        if (!ctx.environment.activeProfiles.contains("testcontainers")) {
-            return
-        }
-
-        val pg = postgres
-        val mg = mongo
-        val kf = kafka
-        Startables.deepStart(pg, mg, kf).get()
+        Startables.deepStart(postgres, mongo, kafka).get()
 
         TestPropertyValues.of(
-            "spring.datasource.url=${pg.jdbcUrl}",
-            "spring.datasource.username=${pg.username}",
-            "spring.datasource.password=${pg.password}",
-            "spring.data.mongodb.uri=${mg.replicaSetUrl}",
-            "spring.kafka.bootstrap-servers=${kf.bootstrapServers}",
+            "spring.datasource.url=${postgres.jdbcUrl}",
+            "spring.datasource.username=${postgres.username}",
+            "spring.datasource.password=${postgres.password}",
+            "spring.data.mongodb.uri=${mongo.replicaSetUrl}",
+            "spring.kafka.bootstrap-servers=${kafka.bootstrapServers}",
         ).applyTo(ctx.environment)
     }
 

@@ -13,10 +13,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.util.UUID
 
-/**
- * Integration tests for batch — focuses on multi-transaction balance
- * accumulation with real DB transactional boundaries.
- */
 class BatchIT : BaseIntegrationTest() {
 
     @Autowired lateinit var mockMvc: MockMvc
@@ -33,8 +29,67 @@ class BatchIT : BaseIntegrationTest() {
     }
 
     @Test
-    fun `batch should accumulate balance correctly in database`() {
-        val items = (1..20).map {
+    fun `should process batch of transactions`() {
+        val items = (1..10).map {
+            BatchTransactionItem(
+                idempotencyKey = UUID.randomUUID().toString(),
+                transaction = TransactionRequest(
+                    currency = "EUR",
+                    entries = listOf(
+                        EntryInput(accountId = accountA, direction = Direction.DEBIT, amountMinor = 100),
+                        EntryInput(accountId = accountB, direction = Direction.CREDIT, amountMinor = 100)
+                    )
+                )
+            )
+        }
+
+        mockMvc.perform(
+            post("/v1/transactions:batch")
+                .header("X-Tenant-Id", tenant)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(BatchRequest(items)))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items.length()").value(10))
+            .andExpect(jsonPath("$.items[0].status").value("CREATED"))
+    }
+
+    @Test
+    fun `batch should handle idempotency replays`() {
+        val key = UUID.randomUUID().toString()
+        val item = BatchTransactionItem(
+            idempotencyKey = key,
+            transaction = TransactionRequest(
+                currency = "EUR",
+                entries = listOf(
+                    EntryInput(accountId = accountA, direction = Direction.DEBIT, amountMinor = 50),
+                    EntryInput(accountId = accountB, direction = Direction.CREDIT, amountMinor = 50)
+                )
+            )
+        )
+
+        mockMvc.perform(
+            post("/v1/transactions:batch")
+                .header("X-Tenant-Id", tenant)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(BatchRequest(listOf(item))))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items[0].status").value("CREATED"))
+
+        mockMvc.perform(
+            post("/v1/transactions:batch")
+                .header("X-Tenant-Id", tenant)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(BatchRequest(listOf(item))))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.items[0].status").value("REPLAYED"))
+    }
+
+    @Test
+    fun `batch should accumulate balance correctly`() {
+        val items = (1..50).map {
             BatchTransactionItem(
                 idempotencyKey = UUID.randomUUID().toString(),
                 transaction = TransactionRequest(
@@ -52,16 +107,15 @@ class BatchIT : BaseIntegrationTest() {
                 .header("X-Tenant-Id", tenant)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(BatchRequest(items)))
-        )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.items.length()").value(20))
-            .andExpect(jsonPath("$.items[0].status").value("CREATED"))
+        ).andExpect(status().isOk)
 
         mockMvc.perform(
-            get("/v1/accounts/$accountA/balance").header("X-Tenant-Id", tenant)
+            get("/v1/accounts/$accountA/balance")
+                .header("X-Tenant-Id", tenant)
         )
-            .andExpect(jsonPath("$.postedBalanceMinor").value(-200))
-            .andExpect(jsonPath("$.version").value(20))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.postedBalanceMinor").value(-500))
+            .andExpect(jsonPath("$.version").value(50))
     }
 
     private fun createAccount(name: String, type: AccountType): String {

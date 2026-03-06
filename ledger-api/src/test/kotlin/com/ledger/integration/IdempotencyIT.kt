@@ -15,10 +15,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.util.UUID
 
-/**
- * Integration tests for idempotency — focuses on scenarios that require
- * real DB persistence (balance not double-counted, conflict detection).
- */
 class IdempotencyIT : BaseIntegrationTest() {
 
     @Autowired lateinit var mockMvc: MockMvc
@@ -35,36 +31,46 @@ class IdempotencyIT : BaseIntegrationTest() {
     }
 
     @Test
-    fun `should not double-count balance on idempotent replay`() {
+    fun `same idempotency key with same payload should replay response`() {
         val key = UUID.randomUUID().toString()
         val request = TransactionRequest(
             currency = "EUR",
             entries = listOf(
-                EntryInput(accountId = accountA, direction = Direction.DEBIT, amountMinor = 500),
-                EntryInput(accountId = accountB, direction = Direction.CREDIT, amountMinor = 500)
+                EntryInput(accountId = accountA, direction = Direction.DEBIT, amountMinor = 200),
+                EntryInput(accountId = accountB, direction = Direction.CREDIT, amountMinor = 200)
             )
         )
         val body = objectMapper.writeValueAsString(request)
 
-        repeat(3) {
-            mockMvc.perform(
-                post("/v1/transactions")
-                    .header("X-Tenant-Id", tenant)
-                    .header("Idempotency-Key", key)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(body)
-            )
-        }
-
-        mockMvc.perform(
-            get("/v1/accounts/$accountA/balance").header("X-Tenant-Id", tenant)
+        val first = mockMvc.perform(
+            post("/v1/transactions")
+                .header("X-Tenant-Id", tenant)
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
         )
-            .andExpect(jsonPath("$.postedBalanceMinor").value(-500))
-            .andExpect(jsonPath("$.version").value(1))
+            .andExpect(status().isCreated)
+            .andReturn()
+
+        val firstTxId = objectMapper.readTree(first.response.contentAsString).get("txId").asText()
+
+        val second = mockMvc.perform(
+            post("/v1/transactions")
+                .header("X-Tenant-Id", tenant)
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+
+        val secondTxId = objectMapper.readTree(second.response.contentAsString).get("txId").asText()
+
+        assert(firstTxId == secondTxId) { "Replay should return same txId" }
     }
 
     @Test
-    fun `different payload with same key should conflict in database`() {
+    fun `same idempotency key with different payload should return 409`() {
         val key = UUID.randomUUID().toString()
 
         val request1 = TransactionRequest(
@@ -97,7 +103,99 @@ class IdempotencyIT : BaseIntegrationTest() {
                 .header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request2))
-        ).andExpect(status().isConflict)
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value("IDEMPOTENCY_CONFLICT"))
+    }
+
+    @Test
+    fun `should not double-count balance on idempotent replay`() {
+        val key = UUID.randomUUID().toString()
+        val request = TransactionRequest(
+            currency = "EUR",
+            entries = listOf(
+                EntryInput(accountId = accountA, direction = Direction.DEBIT, amountMinor = 500),
+                EntryInput(accountId = accountB, direction = Direction.CREDIT, amountMinor = 500)
+            )
+        )
+        val body = objectMapper.writeValueAsString(request)
+
+        repeat(3) {
+            mockMvc.perform(
+                post("/v1/transactions")
+                    .header("X-Tenant-Id", tenant)
+                    .header("Idempotency-Key", key)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body)
+            )
+        }
+
+        mockMvc.perform(
+            get("/v1/accounts/$accountA/balance")
+                .header("X-Tenant-Id", tenant)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.postedBalanceMinor").value(-500))
+            .andExpect(jsonPath("$.version").value(1))
+    }
+
+    @Test
+    fun `should check idempotency key status`() {
+        val key = UUID.randomUUID().toString()
+        val request = TransactionRequest(
+            currency = "EUR",
+            entries = listOf(
+                EntryInput(accountId = accountA, direction = Direction.DEBIT, amountMinor = 100),
+                EntryInput(accountId = accountB, direction = Direction.CREDIT, amountMinor = 100)
+            )
+        )
+
+        mockMvc.perform(
+            post("/v1/transactions")
+                .header("X-Tenant-Id", tenant)
+                .header("Idempotency-Key", key)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request))
+        ).andExpect(status().isCreated)
+
+        mockMvc.perform(
+            get("/v1/idempotency/$key")
+                .header("X-Tenant-Id", tenant)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.key").value(key))
+            .andExpect(jsonPath("$.status").value("CREATED"))
+            .andExpect(jsonPath("$.txId").exists())
+    }
+
+    @Test
+    fun `high volume concurrent idempotency keys should all succeed without duplicates`() {
+        val keys = (1..20).map { UUID.randomUUID().toString() }
+
+        for (key in keys) {
+            val request = TransactionRequest(
+                currency = "EUR",
+                entries = listOf(
+                    EntryInput(accountId = accountA, direction = Direction.DEBIT, amountMinor = 10),
+                    EntryInput(accountId = accountB, direction = Direction.CREDIT, amountMinor = 10)
+                )
+            )
+            mockMvc.perform(
+                post("/v1/transactions")
+                    .header("X-Tenant-Id", tenant)
+                    .header("Idempotency-Key", key)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(request))
+            ).andExpect(status().isCreated)
+        }
+
+        mockMvc.perform(
+            get("/v1/accounts/$accountA/balance")
+                .header("X-Tenant-Id", tenant)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.postedBalanceMinor").value(-200))
+            .andExpect(jsonPath("$.version").value(20))
     }
 
     private fun createAccount(name: String, type: AccountType): String {

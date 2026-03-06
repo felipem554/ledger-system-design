@@ -8,11 +8,8 @@ import org.springframework.test.context.ContextConfiguration
 /**
  * Base class for integration tests.
  *
- * By default, tests expect infrastructure (Postgres, Mongo, Kafka) to be
- * running externally (e.g. via docker compose). To use Testcontainers instead,
- * activate the "testcontainers" profile:
- *
- *   ./gradlew test -Dspring.profiles.active=test,testcontainers
+ * Uses Testcontainers to spin up Postgres, MongoDB, and Kafka automatically.
+ * No manual docker compose needed — just Docker on the host.
  *
  * See TESTING.md for full details.
  */
