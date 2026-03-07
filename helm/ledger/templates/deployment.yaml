@@ -1,18 +1,22 @@
+# ── API Deployment ────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "ledger.fullname" . }}
+  name: {{ include "ledger.fullname" . }}-api
   labels:
     app.kubernetes.io/name: {{ include "ledger.name" . }}
+    app.kubernetes.io/component: api
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.api.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "ledger.name" . }}
+      app.kubernetes.io/component: api
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ include "ledger.name" . }}
+        app.kubernetes.io/component: api
     spec:
       containers:
         - name: ledger-api
@@ -21,6 +25,8 @@ spec:
           ports:
             - containerPort: {{ .Values.service.targetPort }}
           env:
+            - name: LEDGER_MODE
+              value: "api"
             {{- range $k, $v := .Values.env }}
             - name: {{ $k }}
               value: "{{ $v }}"
@@ -38,4 +44,54 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml .Values.api.resources | nindent 12 }}
+---
+# ── Worker Deployment ─────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ledger.fullname" . }}-worker
+  labels:
+    app.kubernetes.io/name: {{ include "ledger.name" . }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ledger.name" . }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "ledger.name" . }}
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: ledger-worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          env:
+            - name: LEDGER_MODE
+              value: "worker"
+            - name: DB_POOL_SIZE
+              value: "10"
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: "{{ $v }}"
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}

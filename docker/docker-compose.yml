@@ -68,13 +68,14 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledger.outbox.dlq.v1 --partitions 12 --replication-factor 1 &&
         echo 'Kafka topics created.'
 
-  ledger-api:
+  # ── API instances (HTTP only, no Kafka consumer/publisher) ──────────────
+
+  ledger-api-1:
     build:
       context: ../ledger-api
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
     environment:
+      LEDGER_MODE: api
       POSTGRES_URL: jdbc:postgresql://postgres:5432/ledger
       POSTGRES_USER: ledger
       POSTGRES_PASSWORD: ledger
@@ -97,6 +98,115 @@ services:
       start_period: 30s
       retries: 10
 
+  ledger-api-2:
+    build:
+      context: ../ledger-api
+      dockerfile: Dockerfile
+    environment:
+      LEDGER_MODE: api
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      MONGO_URI: mongodb://mongo:27017/ledger
+      KAFKA_BOOTSTRAP: kafka:9092
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
+  # ── Worker instances (outbox publisher + projection consumer) ───────────
+
+  ledger-worker-1:
+    build:
+      context: ../ledger-api
+      dockerfile: Dockerfile
+    environment:
+      LEDGER_MODE: worker
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      MONGO_URI: mongodb://mongo:27017/ledger
+      KAFKA_BOOTSTRAP: kafka:9092
+      DB_POOL_SIZE: 10
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
+  ledger-worker-2:
+    build:
+      context: ../ledger-api
+      dockerfile: Dockerfile
+    environment:
+      LEDGER_MODE: worker
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      MONGO_URI: mongodb://mongo:27017/ledger
+      KAFKA_BOOTSTRAP: kafka:9092
+      DB_POOL_SIZE: 10
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+
+  # ── NGINX load balancer ─────────────────────────────────────────────────
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      ledger-api-1:
+        condition: service_healthy
+      ledger-api-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:80/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Observability ───────────────────────────────────────────────────────
+
   prometheus:
     image: prom/prometheus:v2.52.0
     ports:
@@ -104,8 +214,8 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
-      - ledger-api
-      - grafana
+      - ledger-api-1
+      - ledger-api-2
 
   grafana:
     image: grafana/grafana:10.4.2

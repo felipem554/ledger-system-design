@@ -5,4 +5,13 @@ scrape_configs:
   - job_name: 'ledger-api'
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['ledger-api:8080']
+      - targets:
+          - 'ledger-api-1:8080'
+          - 'ledger-api-2:8080'
+
+  - job_name: 'ledger-worker'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - 'ledger-worker-1:8080'
+          - 'ledger-worker-2:8080'

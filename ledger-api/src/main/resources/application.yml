@@ -75,6 +75,7 @@ management:
       show-details: always
 
 ledger:
+  mode: ${LEDGER_MODE:all}
   outbox:
     poll-interval-ms: ${OUTBOX_POLL_MS:200}
     batch-size: ${OUTBOX_BATCH_SIZE:100}

@@ -1,11 +1,25 @@
-{{- if .Values.pdb.enabled -}}
+{{- if .Values.api.pdb.enabled -}}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "ledger.fullname" . }}
+  name: {{ include "ledger.fullname" . }}-api
 spec:
-  minAvailable: {{ .Values.pdb.minAvailable }}
+  minAvailable: {{ .Values.api.pdb.minAvailable }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "ledger.name" . }}
-{{- end -}}
+      app.kubernetes.io/component: api
+{{- end }}
+---
+{{- if .Values.worker.pdb.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ledger.fullname" . }}-worker
+spec:
+  minAvailable: {{ .Values.worker.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "ledger.name" . }}
+      app.kubernetes.io/component: worker
+{{- end }}

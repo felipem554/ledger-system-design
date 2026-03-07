@@ -28,6 +28,7 @@ The target platform is designed around:
 - `docs/adr/ADR-003-kafka-partitioning.md`
 - `docs/adr/ADR-004-at-least-once.md`
 - `docs/adr/ADR-005-testing-pyramid.md`
+- `docs/adr/ADR-006-api-worker-split.md`
 
 ### Operations and Reliability
 - Eventing model: `docs/eventing/eventing.md`
@@ -48,8 +49,17 @@ The target platform is designed around:
 ## Quick Start (Local)
 1. `cd docker`
 2. `docker compose up -d`
-3. Run the Ledger API implementation on `:8080`
-4. Import Grafana dashboards from `docker/grafana/dashboards`
+3. NGINX load balances traffic on `:8080` across 2 API instances
+4. 2 worker instances process the outbox and Kafka projections
+5. Import Grafana dashboards from `docker/grafana/dashboards`
+
+### Process Modes
+The same Docker image runs as either API or worker, controlled by `LEDGER_MODE`:
+| Mode | Description |
+|------|-------------|
+| `api` | HTTP endpoints only (no Kafka consumer/publisher) |
+| `worker` | Outbox publisher + projection consumer (no HTTP routing) |
+| `all` | Everything (default, for standalone development) |
 
 ## Load Test Example
 ```bash

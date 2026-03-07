@@ -9,10 +9,12 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.kafka.support.Acknowledgment
 import org.springframework.stereotype.Component
 
 @Component
+@ConditionalOnProperty(name = ["ledger.mode"], havingValue = "worker", matchIfMissing = true)
 class ProjectionConsumer(
     private val projectionRepo: TransactionProjectionRepository,
     private val objectMapper: ObjectMapper,

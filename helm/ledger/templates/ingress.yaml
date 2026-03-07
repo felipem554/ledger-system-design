@@ -19,7 +19,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "ledger.fullname" $ }}
+                name: {{ include "ledger.fullname" $ }}-api
                 port:
                   number: {{ $.Values.service.port }}
           {{- end }}

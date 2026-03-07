@@ -7,11 +7,13 @@ import com.ledger.repository.postgres.OutboxRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.kafka.core.KafkaTemplate
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.nio.charset.StandardCharsets
 
 @Component
+@ConditionalOnProperty(name = ["ledger.mode"], havingValue = "worker", matchIfMissing = true)
 class OutboxPublisher(
     private val outboxRepo: OutboxRepository,
     private val kafkaTemplate: KafkaTemplate<String, String>,
