@@ -1,18 +1,39 @@
-# Ledger System Design Documentation
+# Distributed Ledger Platform
 
-This repository contains architecture, operations, and delivery documentation for a **high-throughput distributed ledger platform**.
+A **high-throughput distributed ledger platform** with a fully implemented Kotlin/Spring Boot API,
+comprehensive test suite, CI/CD pipelines, and production-ready infrastructure configs.
 
-## System Scope
-The target platform is designed around:
+## System Architecture
 - **NGINX Ingress** (edge routing)
-- **Kotlin services** (transaction API + async workers)
-- **PostgreSQL** (source of truth: balances, idempotency, outbox)
-- **Kafka** (event backbone)
-- **MongoDB** (projection/read model)
+- **Kotlin / Spring Boot 3.3.5** (transaction API + async workers)
+- **PostgreSQL 16** (source of truth: balances, idempotency, outbox)
+- **Kafka** (event backbone — at-least-once delivery)
+- **MongoDB 7** (projection/read model)
 - **Prometheus + Grafana** (observability)
 - **k6** (performance/load validation)
 - **Helm** (Kubernetes deployment model)
 - **Docker Compose** (local environment)
+
+## Implementation Status
+
+The core application is **fully implemented and tested**:
+
+| Component | Status |
+|---|---|
+| REST API (accounts, transactions, batch, idempotency, health) | Done |
+| Domain models + PostgreSQL schema (Flyway) | Done |
+| JDBC repositories + MongoDB projection | Done |
+| Transactional outbox pattern + Kafka consumer | Done |
+| Observability (Micrometer metrics, structured logging, MDC) | Done |
+| Unit tests (~23, mockito-kotlin) | Passing |
+| Integration tests (Testcontainers: Postgres, Mongo, Kafka) | Passing |
+| E2E smoke tests | Passing |
+| Dockerfile (multi-stage JDK 21) | Done |
+| CI/CD workflows (GitHub Actions) | Done |
+| k6 load tests (10 scenarios) | Done |
+| Helm chart (HPA, PDB, ingress) | Done |
+
+See `IMPLEMENTATION_GUIDE.md` for full details and `TESTING.md` for the testing guide.
 
 ## Documentation Index
 
@@ -20,13 +41,15 @@ The target platform is designed around:
 - Capacity planning: `docs/architecture/capacity-planning.md`
 - Index tuning: `docs/architecture/index-tuning.md`
 - NGINX ingress guidance: `docs/architecture/nginx-ingress.md`
-- CI/CD strategy for client preview delivery: `docs/architecture/ci-cd-strategy.md`
+- CI/CD strategy: `docs/architecture/ci-cd-strategy.md`
+- Repository separation plan: `docs/architecture/repo-separation-plan.md`
 
 ### ADRs
 - `docs/adr/ADR-001-hybrid-write-model.md`
 - `docs/adr/ADR-002-idempotency.md`
 - `docs/adr/ADR-003-kafka-partitioning.md`
 - `docs/adr/ADR-004-at-least-once.md`
+- `docs/adr/ADR-005-testing-pyramid.md`
 
 ### Operations and Reliability
 - Eventing model: `docs/eventing/eventing.md`
@@ -36,45 +59,54 @@ The target platform is designed around:
 - Runbook (outbox lag): `docs/runbooks/outbox-lag.md`
 
 ### Testing
+- Testing guide: `TESTING.md`
 - Testcontainers approach: `docs/testing/testcontainers.md`
 - k6 suite notes: `k6/README.md`
 
 ## Quick Start (Local)
-1. `cd docker`
-2. `docker compose up -d`
-3. Run the Ledger API implementation on `:8080`
-4. Import Grafana dashboards from `docker/grafana/dashboards`
+1. `cd docker && docker compose up -d`
+2. `cd ledger-api && ./gradlew bootRun`
+3. API available at `http://localhost:8080`
+4. Grafana at `http://localhost:3000` (admin/admin)
+
+## Running Tests
+```bash
+cd ledger-api
+
+# Unit tests only (no Docker required)
+./gradlew unitTest
+
+# Integration tests (requires Docker for Testcontainers)
+./gradlew integrationTest
+
+# All tests (unit + integration)
+./gradlew test
+```
 
 ## Load Test Example
 ```bash
 BASE_URL=http://localhost:8080 TENANT=t1 k6 run k6/baseline.js
 ```
 
-## Capacity Calculator Example
-```bash
-scripts/capacity_calc.py --tps 2000 --entries 4
-```
+## CI/CD Strategy
+- PR quality gates (lint, unit tests, integration tests, security scan).
+- Auto-deploy validated `main` to **staging** via Helm.
+- Promote immutable releases to **production** with manual approval on tag `v*`.
 
-## CI/CD Recommendation (Client-Ready Delivery)
-To let clients continuously validate progress while development continues:
-- Use PR quality gates (lint/test/security checks).
-- Auto-deploy validated `main` to a stable **staging environment**.
-- Promote immutable releases to production with manual approval.
-
-See full implementation guidance in:
-- `docs/architecture/ci-cd-strategy.md`
+See `docs/architecture/ci-cd-strategy.md` for full details.
 
 ## Documentation Improvement Roadmap
-To make this documentation more professional and client-ready before implementation starts:
 1. Add a `docs/glossary.md` (domain terms, invariants, throughput terminology).
-2. Add non-functional requirements with measurable targets (SLOs/SLIs, RPO/RTO, compliance constraints).
+2. Add non-functional requirements with measurable targets (SLOs/SLIs, RPO/RTO).
 3. Add a release management section (versioning policy, release checklist, rollback policy).
 4. Add sequence diagrams for critical flows (write path, idempotency replay, outbox to projection).
-5. Add an environment matrix (dev/staging/prod differences in scale, data retention, and access controls).
+5. Add an environment matrix (dev/staging/prod differences in scale, data retention, access controls).
 6. Add risk register with mitigation owners for throughput bottlenecks and data consistency risks.
 
-## Expected Next Phase
-After design approval, start implementation with:
-- A minimal vertical slice (POST transaction + projection read).
-- End-to-end CI pipeline and staging deployment.
-- Performance baseline and capacity validation against target throughput.
+## Next Steps
+- Split monorepo into dedicated repositories (see `docs/architecture/repo-separation-plan.md`).
+- Set up container registry and Kubernetes staging environment.
+- Configure secrets management (replace hardcoded credentials).
+- Add OpenTelemetry distributed tracing.
+- Add per-tenant rate limiting.
+- Add production monitoring alerts.
