@@ -45,7 +45,13 @@ echo "[OK] Exported branch to ${EXPORT_DIR}"
 # ---------------------------------------------------------------------------
 # Helper: retry push with exponential backoff
 # ---------------------------------------------------------------------------
-push_with_retry() {
+pull_and_push() {
+    # If the remote repo already has commits (README, LICENSE, etc.),
+    # pull them first so histories are connected, then push.
+    echo "[SYNC] Fetching remote..."
+    git fetch origin main 2>/dev/null && \
+        git merge origin/main --allow-unrelated-histories --no-edit 2>/dev/null || true
+
     local attempt=0 max=4 wait=2
     while [ $attempt -lt $max ]; do
         if git push -u origin main; then
@@ -156,7 +162,7 @@ CI/CD:
 Migrated from ledger-system-design monorepo."
 
 git remote add origin "git@github.com:${GITHUB_ORG}/ledger-api.git"
-push_with_retry
+pull_and_push
 echo "[OK] ledger-api pushed."
 
 # =====================================================================
@@ -290,7 +296,7 @@ Infrastructure:
 Migrated from ledger-system-design monorepo."
 
 git remote add origin "git@github.com:${GITHUB_ORG}/ledger-infra.git"
-push_with_retry
+pull_and_push
 echo "[OK] ledger-infra pushed."
 
 # =====================================================================
@@ -359,7 +365,7 @@ Scenarios:
 Migrated from ledger-system-design monorepo."
 
 git remote add origin "git@github.com:${GITHUB_ORG}/ledger-load-tests.git"
-push_with_retry
+pull_and_push
 echo "[OK] ledger-load-tests pushed."
 
 # =====================================================================
