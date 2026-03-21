@@ -155,7 +155,7 @@ CI/CD:
 
 Migrated from ledger-system-design monorepo."
 
-git remote add origin "https://github.com/${GITHUB_ORG}/ledger-api.git"
+git remote add origin "git@github.com:${GITHUB_ORG}/ledger-api.git"
 push_with_retry
 echo "[OK] ledger-api pushed."
 
@@ -289,7 +289,7 @@ Infrastructure:
 
 Migrated from ledger-system-design monorepo."
 
-git remote add origin "https://github.com/${GITHUB_ORG}/ledger-infra.git"
+git remote add origin "git@github.com:${GITHUB_ORG}/ledger-infra.git"
 push_with_retry
 echo "[OK] ledger-infra pushed."
 
@@ -358,7 +358,7 @@ Scenarios:
 
 Migrated from ledger-system-design monorepo."
 
-git remote add origin "https://github.com/${GITHUB_ORG}/ledger-load-tests.git"
+git remote add origin "git@github.com:${GITHUB_ORG}/ledger-load-tests.git"
 push_with_retry
 echo "[OK] ledger-load-tests pushed."
 

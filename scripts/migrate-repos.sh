@@ -98,7 +98,7 @@ init_and_push() {
     git init -b main
     git add -A
     git commit -m "${commit_message}"
-    git remote add origin "https://github.com/${GITHUB_ORG}/${repo_name}.git"
+    git remote add origin "git@github.com:${GITHUB_ORG}/${repo_name}.git"
 
     echo "[PUSH] Pushing ${repo_name} to origin/main..."
     local attempt=0
