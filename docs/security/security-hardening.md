@@ -1,5 +1,12 @@
 # Security Hardening Guide (v1)
 
+This is the **target-state** baseline. The implementation does not meet it yet:
+`ledger-api` currently has no authentication, trusts a client-supplied
+`X-Tenant-Id`, runs Kafka as `PLAINTEXT`, and exposes actuator endpoints
+unauthenticated. The gap analysis and phased path (P0 identity/isolation → P1
+authZ, Kafka SASL_SSL + ACLs, TLS, audit → P2 hardening) are in
+[security-plan.md](security-plan.md).
+
 ## Network boundaries
 - Public exposure ONLY via NGINX Ingress
 - Ledger API is ClusterIP (private)
