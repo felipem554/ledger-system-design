@@ -1,6 +1,9 @@
 import { check, sleep } from 'k6';
-import { postTx, getBalance } from './common.js';
-import { uuidv4, randomItem } from './utils.js';
+import { postTx, getBalance, seedAccounts, pickPair, transfer, randomItem, uuidv4 } from './common.js';
+
+// Intentionally small pool: concentrate writes on a few "hot" accounts to
+// exercise row-level contention on account_state.
+const HOT_ACCOUNTS = Number(__ENV.HOT_ACCOUNTS || 10);
 
 export const options = {
   scenarios: {
@@ -11,10 +14,10 @@ export const options = {
       preAllocatedVUs: 100,
       maxVUs: 1500,
       stages: [
-        { target: 200, duration: '2m' },
-        { target: 800, duration: '8m' },
-        { target: 800, duration: '10m' },
-        { target: 200, duration: '2m' },
+        { target: 200, duration: '30s' },
+        { target: 800, duration: '40s' },
+        { target: 800, duration: '30s' },
+        { target: 200, duration: '20s' },
       ],
     },
   },
@@ -24,28 +27,21 @@ export const options = {
   },
 };
 
-const hot = ['CLEARING', 'FEES', 'SETTLEMENT', 'TREASURY', 'HOT1', 'HOT2', 'HOT3', 'HOT4', 'HOT5', 'HOT6'];
+export function setup() {
+  return { accounts: seedAccounts(HOT_ACCOUNTS, { namePrefix: 'hot' }) };
+}
 
-export default function () {
+export default function (data) {
+  const accounts = data.accounts;
   const r = Math.random();
-  const a1 = randomItem(hot);
-  const a2 = randomItem(hot);
-  if (a1 === a2) return;
 
   if (r < 0.2) {
-    const res = getBalance(a1);
+    const res = getBalance(randomItem(accounts));
     check(res, { 'balance 200': (x) => x.status === 200 });
   } else {
-    const payload = {
-      currency: 'EUR',
-      entries: [
-        { accountId: a1, direction: 'DEBIT', amountMinor: 1 },
-        { accountId: a2, direction: 'CREDIT', amountMinor: 1 },
-      ],
-      metadata: { scenario: 'hotspot' },
-    };
-    const res = postTx(payload, uuidv4());
-    check(res, { 'post ok-ish': (x) => [201,409,400].includes(x.status) });
+    const [a1, a2] = pickPair(accounts);
+    const res = postTx(transfer(a1, a2, 1, 'hotspot'), uuidv4());
+    check(res, { 'post ok-ish': (x) => [201, 409, 400].includes(x.status) });
   }
   sleep(0.05);
 }

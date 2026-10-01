@@ -1,6 +1,11 @@
 import { check } from 'k6';
-import { postTx } from './common.js';
-import { uuidv4 } from './utils.js';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.1.0/index.js';
+import {
+  postTx, seedAccounts, transfer, uuidv4,
+  recordIdempotentPost, recordPoolKeysCreated, countExistingIdempotencyKeys, idempotencyReport,
+} from './common.js';
+
+const POOL_SIZE = 5000;
 
 export const options = {
   scenarios: {
@@ -8,26 +13,40 @@ export const options = {
       executor: 'constant-arrival-rate',
       rate: 500,
       timeUnit: '1s',
-      duration: '8m',
+      duration: '2m',
       preAllocatedVUs: 200,
       maxVUs: 2000,
     },
   },
+  thresholds: {
+    http_req_failed: ['rate<0.01'],
+    idempotency_conflicts: ['count==0'],
+  },
 };
 
-// Pre-generated keys to replay
-const KEYS = Array.from({length: 5000}, () => uuidv4());
+// Keys must be derived from setup() data: init code runs once per VU, so a
+// random pool built at module level would be private to each VU and replays
+// would almost never collide.
+const poolKey = (runId, i) => `${runId}-replay-${i}`;
 
-export default function () {
-  const key = Math.random() < 0.7 ? KEYS[Math.floor(Math.random()*KEYS.length)] : uuidv4();
-  const payload = {
-    currency: 'EUR',
-    entries: [
-      { accountId: 'A1', direction: 'DEBIT', amountMinor: 1 },
-      { accountId: 'A2', direction: 'CREDIT', amountMinor: 1 },
-    ],
-    metadata: { scenario: 'idempotency' },
-  };
-  const res = postTx(payload, key);
-  check(res, { 'post 201/409': (x) => x.status === 201 || x.status === 409 });
+export function setup() {
+  return { runId: uuidv4(), accounts: seedAccounts(2, { namePrefix: 'idem' }) };
+}
+
+export default function (data) {
+  const [a1, a2] = data.accounts;
+  const pooled = Math.random() < 0.7;
+  const key = pooled ? poolKey(data.runId, Math.floor(Math.random() * POOL_SIZE)) : uuidv4();
+  const res = postTx(transfer(a1, a2, 1, 'idempotency'), key);
+  recordIdempotentPost(res, pooled);
+  check(res, { 'post 201': (x) => x.status === 201 });
+}
+
+export function teardown(data) {
+  const keys = Array.from({ length: POOL_SIZE }, (_, i) => poolKey(data.runId, i));
+  recordPoolKeysCreated(countExistingIdempotencyKeys(keys));
+}
+
+export function handleSummary(data) {
+  return { stdout: textSummary(data, { indent: ' ', enableColors: false }) + idempotencyReport(data) };
 }
