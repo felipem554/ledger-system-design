@@ -1,0 +1,8 @@
+replicaCount: 2
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+env:
+  LOG_LEVEL: DEBUG
