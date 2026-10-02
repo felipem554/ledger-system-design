@@ -9,6 +9,22 @@ Set up a delivery workflow so the client can continuously access a stable applic
 - **Traceability**: every deployment maps to a commit SHA and image tag.
 - **Production-like confidence**: use the same container image and Helm chart across environments.
 
+## Implemented Topology (multi-repo)
+The pipeline below is split across three repositories that hand off via a
+published image tag and trigger events, never cross-repo checkouts — see
+[ci-architecture.md](ci-architecture.md):
+
+| Repo | Pipeline stage it owns |
+|------|------------------------|
+| `ledger-api` | PR checks (lint, unit, integration, Trivy) and build + publish image to GHCR on `main` — **no deploy, no kube credentials** |
+| `ledger-infra` | Helm deploy to staging (`deploy-staging.yml`) and production (`release-prod.yml`) with `values-staging.yaml` / `values-prod.yaml`; owns cluster credentials |
+| `ledger-load-tests` | k6 smoke and load suites against a deployed URL |
+
+So the `build-and-deploy-staging.yml` single-workflow layout suggested below is
+realized as `ledger-api/build-and-publish.yml` → `ledger-infra/deploy-staging.yml`
+→ `ledger-load-tests` smoke. Cross-repo triggering (`repository_dispatch`) and
+GitOps are still to be wired.
+
 ## Environment Model
 Use four environments with clear promotion gates:
 

@@ -1,17 +1,20 @@
+# Local dev stack for the ledger platform: the ledger-service API, its backing
+# stores, and monitoring. The API is consumed as a published image from the
+# ledger-service repo; override LEDGER_SERVICE_IMAGE in .env to test a local tag.
 name: ledger-dev
 services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: ledger
-      POSTGRES_PASSWORD: ledger
-      POSTGRES_DB: ledger
+      POSTGRES_USER: ${POSTGRES_USER:-ledger}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledger}
+      POSTGRES_DB: ${POSTGRES_DB:-ledger}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ledger} -d ${POSTGRES_DB:-ledger}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -29,66 +32,97 @@ services:
       retries: 20
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: apache/kafka:3.8.1
     ports:
-      - "9092:9092"
+      - "19092:19092"
     environment:
-      # KRaft mode (no ZooKeeper)
-      KAFKA_ENABLE_KRAFT: "yes"
-      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
-      KAFKA_CFG_NODE_ID: "1"
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
-      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092"
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
-      KAFKA_CFG_NUM_PARTITIONS: "128"
-      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "1"
-      ALLOW_PLAINTEXT_LISTENER: "yes"
+      # KRaft mode (native, no ZooKeeper)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # Two broker listeners: INTERNAL for containers, EXTERNAL for host machine
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: "ledger-dev-cluster-00001"
     volumes:
-      - kafkadata:/bitnami/kafka
+      - kafkadata:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 30
 
   kafka-init:
-    image: bitnami/kafka:3.7
+    image: apache/kafka:3.8.1
     depends_on:
       kafka:
         condition: service_healthy
-    entrypoint: ["/bin/bash","-lc"]
-    command: >
-      "
-      kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists
-        --topic ledger.transactions.v1 --partitions 128 --replication-factor 1;
-      kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists
-        --topic ledger.outbox.dlq.v1 --partitions 12 --replication-factor 1;
-      echo 'Kafka topics created.';
-      "
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledger.transactions.v1 --partitions 128 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledger.outbox.dlq.v1 --partitions 12 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledger.commands.transactions.v1 --partitions 32 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledger.commands.dlq.v1 --partitions 12 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic ledger.commands.results.v1 --partitions 32 --replication-factor 1 &&
+        echo 'Kafka topics created.'
+
+  ledger-service:
+    image: ${LEDGER_SERVICE_IMAGE:-ghcr.io/felipem554/ledger-service:latest}
+    ports:
+      - "8080:8080"
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ledger}
+      POSTGRES_USER: ${POSTGRES_USER:-ledger}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledger}
+      MONGO_URI: mongodb://mongo:27017/ledger
+      KAFKA_BOOTSTRAP: kafka:9092
+      COMMAND_INGEST_ENABLED: ${COMMAND_INGEST_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
 
   prometheus:
-    image: prom/prometheus:v2.52.0
+    image: prom/prometheus:v2.54.1
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
-      - grafana
+      - ledger-service
 
   grafana:
-    image: grafana/grafana:10.4.2
+    image: grafana/grafana:11.2.0
     ports:
       - "3000:3000"
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+    depends_on:
+      - prometheus
     volumes:
       - grafanadata:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
 
 volumes:
   pgdata:

@@ -1,8 +1,13 @@
+# Pre-provisions the Prometheus datasource. The fixed `uid` lets the provisioned
+# dashboards (../dashboards, synced from the ledger-service repo) reference it
+# without a hand-copied generated id.
 apiVersion: 1
 
 datasources:
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+    editable: true

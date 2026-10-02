@@ -1,0 +1,17 @@
+# Local secrets (see docker/.env.example)
+.env
+*.secret
+*.key
+*.pem
+values-*.secret.yaml
+
+# IDE
+.idea/
+.vscode/
+
+# Stray local build output of the service repo
+ledger-api/
+
+# Python
+__pycache__/
+*.py[cod]

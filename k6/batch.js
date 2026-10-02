@@ -1,6 +1,8 @@
-import http from 'k6/http';
 import { check } from 'k6';
-import { uuidv4 } from './utils.js';
+import { postBatch, seedAccounts, pickPair, uuidv4 } from './common.js';
+
+const ACCOUNTS = Number(__ENV.ACCOUNTS || 200);
+const BATCH_SIZE = Number(__ENV.BATCH_SIZE || 50);
 
 export const options = {
   scenarios: {
@@ -8,35 +10,47 @@ export const options = {
       executor: 'constant-arrival-rate',
       rate: 20,
       timeUnit: '1s',
-      duration: '10m',
+      duration: '2m',
       preAllocatedVUs: 50,
       maxVUs: 500,
     },
   },
+  thresholds: {
+    http_req_failed: ['rate<0.01'],
+  },
 };
 
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-const TENANT = __ENV.TENANT || 't1';
+export function setup() {
+  return { accounts: seedAccounts(ACCOUNTS, { namePrefix: 'batch' }) };
+}
 
-export default function () {
+export default function (data) {
+  const accounts = data.accounts;
   const items = [];
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < BATCH_SIZE; i++) {
+    const [a1, a2] = pickPair(accounts);
     items.push({
       idempotencyKey: uuidv4(),
       transaction: {
         currency: 'EUR',
         entries: [
-          { accountId: 'A1', direction: 'DEBIT', amountMinor: 1 },
-          { accountId: 'A2', direction: 'CREDIT', amountMinor: 1 },
+          { accountId: a1, direction: 'DEBIT', amountMinor: 1 },
+          { accountId: a2, direction: 'CREDIT', amountMinor: 1 },
         ],
         metadata: { scenario: 'batch' },
       },
     });
   }
 
-  const res = http.post(`${BASE_URL}/v1/transactions:batch`, JSON.stringify({ items }), {
-    headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': TENANT },
+  const res = postBatch(items);
+  check(res, {
+    'batch 200': (r) => r.status === 200,
+    'all items created': (r) => {
+      try {
+        return r.json('items').every((it) => it.status === 'CREATED' || it.status === 'REPLAYED');
+      } catch (_) {
+        return false;
+      }
+    },
   });
-
-  check(res, { 'batch 200': (r) => r.status === 200 });
 }

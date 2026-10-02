@@ -218,9 +218,13 @@ These are worth knowing before tuning or extending the eventing path:
 
 ## Local & test setup
 
-- Dependencies: `docker compose -f docker-compose-test.yml up -d` (Postgres,
-  Mongo, Kafka). The compose Kafka exposes its external listener on
-  `localhost:19092`.
+- **Full stack in Docker** (app included):
+  `docker compose -f docker/docker-compose.yml up -d --build`. The app container
+  reaches Kafka on the internal listener `kafka:9092`; the host still sees the
+  external listener on `localhost:19092`.
+- **Infra only** (app on the host):
+  `docker compose -f docker-compose-test.yml up -d` (Postgres, Mongo, Kafka). The
+  compose Kafka exposes its external listener on `localhost:19092`.
 - Run the app pointing at that listener:
   `KAFKA_BOOTSTRAP=localhost:19092 ./gradlew bootRun`
   (the app default is `localhost:9092`).

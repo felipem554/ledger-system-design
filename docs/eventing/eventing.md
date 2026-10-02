@@ -1,8 +1,15 @@
 # Eventing (Kafka)
 
 ## Topics
+
+Outbound (outbox → projections), see [kafka.md](../kafka/kafka.md):
 - `ledger.transactions.v1` — ledger business events (posted/reversed)
 - `ledger.outbox.dlq.v1` — dead-letter queue for poison messages
+
+Inbound command ingestion (flag-gated by `COMMAND_INGEST_ENABLED`, off by default), see [kafka-command-ingestion.md](../kafka/kafka-command-ingestion.md):
+- `ledger.commands.transactions.v1` — transaction commands, executed through the same services as the HTTP write API
+- `ledger.commands.results.v1` — terminal outcome per command (CREATED / REPLAYED / FAILED), keyed by `commandId`
+- `ledger.commands.dlq.v1` — unprocessable commands (permanent errors immediately; transient errors after capped retries)
 
 ## Delivery semantics
 - At-least-once delivery
@@ -17,6 +24,7 @@
 
 ## Consumer groups
 - `ledger-projection-mongo-v1` — writes/upserts Mongo projections
+- `ledger-command-ingest-v1` — consumes the command topic (concurrency ≤ command topic partition count)
 - (future) `ledger-audit-v1` — compliance/audit sink
 - (future) `ledger-analytics-v1` — analytics/reporting
 

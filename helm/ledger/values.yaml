@@ -1,5 +1,8 @@
+# Image published by the ledger-service repo's CI (see its docs/ci-architecture.md:
+# the app repo publishes an image tag; this repo deploys it). Pin `tag` to a sha
+# or version at deploy time — `latest` is a dev convenience only.
 image:
-  repository: ledger-api
+  repository: ghcr.io/felipem554/ledger-service
   tag: "latest"
   pullPolicy: IfNotPresent
 
@@ -13,6 +16,11 @@ service:
 ingress:
   enabled: true
   className: nginx
+  annotations:
+    # Sized for POST /v1/transactions:batch (up to 500 transactions per call).
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
   hosts:
     - host: ledger.local
       paths:
@@ -28,14 +36,32 @@ resources:
     cpu: "2"
     memory: "2Gi"
 
+probes:
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  liveness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+
 env:
   LOG_LEVEL: INFO
   OTEL_EXPORTER_OTLP_ENDPOINT: ""
   KAFKA_BOOTSTRAP: "kafka:9092"
   POSTGRES_URL: "jdbc:postgresql://postgres:5432/ledger"
   POSTGRES_USER: "ledger"
-  POSTGRES_PASSWORD: "ledger"
   MONGO_URI: "mongodb://mongo:27017/ledger"
+  # Kafka command-ingestion write path. Ships disabled; enable per environment
+  # once the command topics exist. Keep COMMAND_INGEST_CONCURRENCY <= the
+  # command topic's partition count (32 in prod/staging).
+  COMMAND_INGEST_ENABLED: "false"
+  COMMAND_INGEST_CONCURRENCY: "8"
+
+# Sensitive values — stored in a Kubernetes Secret and injected via envFrom.
+# Set POSTGRES_PASSWORD at deploy time: --set secretEnv.POSTGRES_PASSWORD=<value>
+# Never commit real credentials here.
+secretEnv:
+  POSTGRES_PASSWORD: ""
 
 hpa:
   enabled: true
@@ -47,5 +73,13 @@ pdb:
   enabled: true
   minAvailable: 2
 
+# Restricts pod ingress to the ingress controller and Prometheus namespaces
+# (plus same-namespace traffic). Egress is left open — the app needs Postgres,
+# MongoDB, Kafka, and DNS, which usually live outside this chart.
 networkPolicy:
   enabled: false
+  # Namespace labels allowed to reach the API port. Adjust to your cluster's
+  # ingress-controller / monitoring namespace labels.
+  allowedNamespaceSelectors:
+    - kubernetes.io/metadata.name: ingress-nginx
+    - kubernetes.io/metadata.name: monitoring
